@@ -1,72 +1,23 @@
-from multiprocessing import Process, Value, Manager
 import random
 import time
 
 
 # Implement a solver that returns a list of queen's locations
 #  - Make sure the list is the right length, and uses the numbers from 0 .. BOARD_SIZE-1
-def solve(board_size, verbose=0):
+def solve(board_size):
     # This almost certainly is a wrong answer!
     board = Board(board_size)
-    answer = search(board, verbose)
+    answer = search(board)
     return answer
 
 
-def search(board, verbose):
-    # 0 represents searching and 1 represents found
-    v = Value('i', 0)
-    processes = []
-    result = Manager().dict()
-    num_processes = min(10, board.board_size)
-    for start_col in range(num_processes):
-        if verbose == 1:
-            print("Start Col:", start_col)
-        name = "Process-"+str(start_col)
-        # process = Process(target=recursive_solve, args=(board, start_col, v, result, name))
-        process = Process(target=iterative_repair_solve, args=(board, v, result, name))
-        process.start()
-        processes.append(process)
-
-    for process in processes:
-        process.join()
-
-    return [row.index("Q") for row in result["solved"].state]
+def search(board):
+    solution = iterative_repair_solve(board, use_iterative_reinitialization=False, debug=False)
+    return[row.index("Q") for row in solution.state]
 
 
-def recursive_solve(board, col, value, result, name):
-    # base case: If all queens are placed
-    # then return true
-
-    if value.value == 1:
-        return
-
-    if board.is_goal_state(method='backtracking'):
-        return True
-
-    # Consider this column and try placing
-    # this queen in all rows one by one
-    for i in range(board.board_size):
-        coord = (i, col % board.board_size)
-        if board.check_placement(coord):
-            # Place this queen in board[i][col]
-            board.place_queen(coord)
-            # recur to place rest of the queens
-            if recursive_solve(board, col + 1, value, result, name):
-                value.value = 1
-                result["solved"] = board
-                return True
-
-            # If placing queen in board[i][col
-            # doesn't lead to a solution, then
-            # queen from board[i][col]
-            board.backtrace(coord)
-
-    # if the queen can not be placed in any row in
-    # this col then return false
-    return False
-
-
-def iterative_repair_solve(board, value=None, result=None, name=None, debug=False, callback=None):
+def iterative_repair_solve(board, value=None, result=None, name="Iterative Repair Bot:", debug=False, callback=None,
+                           use_iterative_reinitialization=False):
 
     # first, place all queens
     positions = []
@@ -77,10 +28,19 @@ def iterative_repair_solve(board, value=None, result=None, name=None, debug=Fals
 
     # iteratively repair
     while not board.is_goal_state(method='iterative_repair'):
+        total_conflicts = 0
 
-        # check if other processes have solved it. If so, return...
-        if value is not None and value.value == 1:
-            return
+        # check if other processes have a better state, if so, set this state to the best state
+        if use_iterative_reinitialization and result is not None:
+            items = result.items()
+
+            if "solved" in result.keys():
+                return
+
+            items.sort(key=lambda x: x[1][0])
+            if len(items) > 0:
+                board.state = items[0][1][1]
+                positions = items[0][1][2]
 
         # if a callback is passed, call it!
         if callback is not None:
@@ -88,12 +48,19 @@ def iterative_repair_solve(board, value=None, result=None, name=None, debug=Fals
 
         # start of bottleneck
         for col in range(board.board_size):
+            # check if other processes have solved it. If so, return...
+            if value is not None and value.value == 1:
+                return
+
             # Grab the row the queen is in
             row = positions[col]
 
             # Calculate the conflicts in given column
             # This is a huge bottleneck
             conflicts = [board.get_conflicts((r, col)) for r in range(board.board_size)]
+
+            # Testing this new function. It is slower...
+            # conflicts = [board.optimized_get_conflicts((r, col)) for r in range(board.board_size)]
 
             if debug:
                 print("-", " - " * board.board_size)
@@ -129,6 +96,7 @@ def iterative_repair_solve(board, value=None, result=None, name=None, debug=Fals
 
                 positions[col] = new_row
                 board.swap((row, col), (new_row, col))
+                total_conflicts += min_val
             elif debug:
                 print("Already in best state")
 
@@ -143,6 +111,9 @@ def iterative_repair_solve(board, value=None, result=None, name=None, debug=Fals
                 print(board.get_heatmap())
                 print("-", " - " * (board.board_size - 1))
                 time.sleep(3)
+        print(name, total_conflicts)
+        if use_iterative_reinitialization and result is not None:
+            result[name] = (total_conflicts, board.state.copy(), positions.copy())
 
     # if a callback is passed, call it!
     if callback is not None:
@@ -152,7 +123,8 @@ def iterative_repair_solve(board, value=None, result=None, name=None, debug=Fals
     if value is not None:
         value.value = 1
         result["solved"] = board
-    print("got the solution fam")
+
+    print(name, "got the solution fam")
     return board
 
 
@@ -193,7 +165,6 @@ class Board:
         for r in range(row):
             if self.state[r][col] == "Q" and r != row:
                 return False
-
         return True
 
     def get_conflicts(self, coordinates):
@@ -236,59 +207,19 @@ class Board:
                 conflicts += queen_count
         return conflicts
 
-    def optimized_get_conflicts(self, queen_coordinates, col_num):
-        """
-        This method is an optimized version of the get_conflicts method.
-        Instead of looking at every point, it only looks where the queens are and calculates the whole conflict matrix.
-        Returns a list of columns
-        """
-        conflict_matrix = [[0 for _ in range(self.board_size)] for _ in range(self.board_size)]
-        for pos in queen_coordinates:
-            num_rows = self.board_size
-            num_cols = self.board_size
-            row = num_rows - 1 - pos[0]
-            col = pos[1]
-
-            # Finding first diagonal
-            diagonal_1_r, diagonal_1_c = num_rows - 1 - max(row - col, 0), max(col - row, 0)
-            d1_len = min(diagonal_1_r + 1, num_cols - diagonal_1_c)
-            # Find the conflicts in the diagonals
-            for k in range(d1_len):
-                if not (diagonal_1_r - k, diagonal_1_c + k) == pos:
-                    conflict_matrix[diagonal_1_r - k][diagonal_1_c + k] += 1
-
-            # Finding second diagonal
-            t = min(row, num_cols - col - 1)
-            diagonal_2_r, diagonal_2_c = num_rows - 1 - row + t, col + t
-            d2_len = min(diagonal_2_r, diagonal_2_c) + 1
-            # Find the conflicts in the diagonals
-            for k in range(d2_len):
-                if not (diagonal_2_r - k, diagonal_2_c - k) == pos:
-                    conflict_matrix[diagonal_2_r - k][diagonal_2_c - k] += 1
-
-            # Now check the row
-            for i in range(self.board_size):
-                if i != pos[1]:
-                    conflict_matrix[pos[0]][i] += 1
-        return [row[col_num] for row in conflict_matrix]
-
     def get_diagonals(self, pos):
-        num_rows = self.board_size
-        num_cols = self.board_size
-        row = num_rows - 1 - pos[0]
+        row = self.board_size - 1 - pos[0]
         col = pos[1]
 
         # Finding first diagonal
-        diagonal_1_r, diagonal_1_c = num_rows - 1 - max(row - col, 0), max(col - row, 0)
-        d1_len = min(diagonal_1_r + 1, num_cols - diagonal_1_c)
-        diagonal_1 = [self.state[diagonal_1_r - k][diagonal_1_c + k] for k in range(d1_len)]
+        diagonal_1_r, diagonal_1_c = self.board_size - 1 - max(row - col, 0), max(col - row, 0)
+        d1_len = min(diagonal_1_r + 1, self.board_size - diagonal_1_c)
 
         # Finding second diagonal
-        t = min(row, num_cols - col - 1)
-        diagonal_2_r, diagonal_2_c = num_rows - 1 - row + t, col + t
+        t = min(row, self.board_size - col - 1)
+        diagonal_2_r, diagonal_2_c = self.board_size - 1 - row + t, col + t
         d2_len = min(diagonal_2_r, diagonal_2_c) + 1
-        diagonal_2 = [self.state[diagonal_2_r - k][diagonal_2_c - k] for k in range(d2_len)]
-        return diagonal_1, diagonal_2
+        return [self.state[diagonal_1_r - k][diagonal_1_c + k] for k in range(d1_len)], [self.state[diagonal_2_r - k][diagonal_2_c - k] for k in range(d2_len)]
 
     def place_queen(self, coordinates):
         row, col = coordinates
@@ -335,32 +266,15 @@ class Board:
         return r
 
 
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-n", type=int)
-    parser.add_argument("-multi", type=bool)
-    args = parser.parse_args()
-
-    if args.n is not None:
-        print("Args passed")
-        n = args.n
-
-        print("n =", n)
-        print("Using multiprocessing:", args.multi)
-        if args.multi:
-            solve(n)
-        else:
-            iterative_repair_solve(Board(n))
+def manual_execution(n):
+    start_time = time.time()
+    n = 128
+    print("n =", n)
+    solve(n)
+    end_time = time.time() - start_time
+    if end_time < 60:
+        print("Time taken:", end_time, "seconds.")
     else:
-        print("No args passed")
-        n = 10
-        multi = False
+        print("Time taken:", end_time/60, "minutes.")
 
-        print("n =", n)
-        print("Using multiprocessing:", multi)
-        if multi:
-            print(solve(n))
-        else:
-            b = iterative_repair_solve(Board(n))
-            print([row.index("Q") for row in b.state])
+
