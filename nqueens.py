@@ -4,33 +4,87 @@ import time
 
 # Implement a solver that returns a list of queen's locations
 #  - Make sure the list is the right length, and uses the numbers from 0 .. BOARD_SIZE-1
-def solve(board_size):
+def solve(board_size, verbose=0, initialization_method='diagonal'):
     # This almost certainly is a wrong answer!
     board = Board(board_size)
-    answer = search(board)
+    answer = search(board, verbose, initialization_method=initialization_method)
     return answer
 
 
-def search(board):
-    solution = iterative_repair_solve(board, use_iterative_reinitialization=False, debug=False)
-    return[row.index("Q") for row in solution.state]
+def search(board, verbose, initialization_method):
+    solution = iterative_repair_solve(board, use_iterative_reinitialization=False, debug=False, verbose=verbose, initialization_method=initialization_method)
+
+    # Grab the output
+    output = [row.index("Q") for row in solution.state]
+
+    # Transpose it
+    transposed = [0 for _ in range(len(output))]
+    for i in range(len(transposed)):
+        transposed[output[i]] = i
+
+    # Return the list where transposed[col] = row
+    return transposed
 
 
 def iterative_repair_solve(board, value=None, result=None, name="Iterative Repair Bot:", debug=False, callback=None,
-                           use_iterative_reinitialization=False):
+                           use_iterative_reinitialization=False, verbose=0, initialization_method='random'):
 
     # first, place all queens
     positions = []
-    for col in range(board.board_size):
-        row = random.randint(0, board.board_size-1)
-        board.place_queen((row, col))
-        positions.append(row)
+    if initialization_method == 'random':
+        if verbose > 0:
+            print("Initializing randomly")
+        # generate a list of the available rows
+        for col in range(board.board_size):
+            row = random.randint(0, board.board_size-1)
+            board.place_queen((row, col))
+            positions.append(row)
+    elif initialization_method == 'row_exclusive':
+        if verbose > 0:
+            print("Initializing row-exclusive")
+
+        # Non random initialization
+        available_rows = list(range(board.board_size))
+        for col in range(board.board_size):
+            row = random.choice(available_rows)
+            available_rows.remove(row)
+            board.place_queen((row, col))
+            positions.append(row)
+    elif initialization_method == 'diagonal':
+        # Diagonal initialization
+        # go from n/2 to n diagonally
+        # Place queens from 0 to (n-1)/2)
+
+        # check to see if n/2 is even or odd
+        midpoint = round((board.board_size-1)/2) if (round(board.board_size/2)) % 2 == 0 else round(board.board_size/2)
+        if verbose > 0:
+            print("Initializing diagonally")
+            print("Midpoint =", midpoint)
+
+        row = 1
+        for col in range(0, midpoint):
+            board.place_queen((row, col))
+            positions.append(row)
+            row += 2
+
+        # Place queens from (n-1)/2) to n
+        row = 0
+        for col in range(midpoint, board.board_size):
+            board.place_queen((row, col))
+            positions.append(row)
+            row += 2
+    else:
+        raise ValueError
 
     # iteratively repair
+    if verbose > 0:
+        print("Initialized")
+
+    instant_solve = True
     while not board.is_goal_state(method='iterative_repair'):
         total_conflicts = 0
-
-        # check if other processes have a better state, if so, set this state to the best state
+        instant_solve = False
+        # LEGACY: check if other processes have a better state, if so, set this state to the best state
         if use_iterative_reinitialization and result is not None:
             items = result.items()
 
@@ -111,7 +165,8 @@ def iterative_repair_solve(board, value=None, result=None, name="Iterative Repai
                 print(board.get_heatmap())
                 print("-", " - " * (board.board_size - 1))
                 time.sleep(3)
-        print(name, total_conflicts)
+        if verbose > 1:
+            print(name, total_conflicts)
         if use_iterative_reinitialization and result is not None:
             result[name] = (total_conflicts, board.state.copy(), positions.copy())
 
@@ -124,7 +179,7 @@ def iterative_repair_solve(board, value=None, result=None, name="Iterative Repai
         value.value = 1
         result["solved"] = board
 
-    print(name, "got the solution fam")
+    print(name, "got the solution fam." if not instant_solve else "solved it during initialization fam.")
     return board
 
 
@@ -266,15 +321,28 @@ class Board:
         return r
 
 
+def generate_time_data(min_n=4, max_n=1000, step_size=1):
+    with open("{}_chrono_data.csv".format(time.asctime()), 'a') as data:
+        data.write("n,time\n")
+        # Run n=4 to n=max_n
+        for n in range(min_n, max_n + 1, step_size):
+            print("Running n =", n)
+            start_time = time.time()
+            solve(n, verbose=0, initialization_method='diagonal')
+            data.write(str(n) + "," + str(time.time()-start_time)+ "\n")
+            print()
+
+
 def manual_execution(n):
     start_time = time.time()
-    n = 128
     print("n =", n)
-    solve(n)
+    b = solve(n, verbose=2, initialization_method='diagonal')
     end_time = time.time() - start_time
     if end_time < 60:
         print("Time taken:", end_time, "seconds.")
     else:
         print("Time taken:", end_time/60, "minutes.")
+    print(b)
 
-
+# generate_time_data(min_n=10, max_n=1000, step_size=10)
+# manual_execution(10)
