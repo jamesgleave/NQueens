@@ -354,14 +354,3 @@ def manual_execution(n):
     else:
         print("Time taken:", end_time/60, "minutes.")
     print(b)
-
-
-# generate_time_data(min_n=4, max_n=1000 , step_size=1)
-# manual_execution(14)
-
-# n = 500
-# random: 3.5 minutes
-# diagonal: 7.2 minutes
-# row_exclusive: 6.3 minutes
-
-# Note that random may work better when diagonal fails during initialization
