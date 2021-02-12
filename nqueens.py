@@ -4,7 +4,8 @@ import time
 
 # Implement a solver that returns a list of queen's locations
 #  - Make sure the list is the right length, and uses the numbers from 0 .. BOARD_SIZE-1
-def solve(board_size, verbose=0, initialization_method='diagonal'):
+def solve(board_size, verbose=0, initialization_method='optimal'):
+
     # This almost certainly is a wrong answer!
     board = Board(board_size)
     answer = search(board, verbose, initialization_method=initialization_method)
@@ -27,7 +28,17 @@ def search(board, verbose, initialization_method):
 
 
 def iterative_repair_solve(board, value=None, result=None, name="Iterative Repair Bot:", debug=False, callback=None,
-                           use_iterative_reinitialization=False, verbose=0, initialization_method='random'):
+                           use_iterative_reinitialization=False, verbose=0, initialization_method='optimal'):
+
+    # Determine if the board can be solved easily...
+    if initialization_method == 'optimal':
+        # check our condition shown in the paper
+        initialization_method = 'random'
+        for i in [0, 1, 2, 3]:
+            k = (board.board_size - 4 - i) / 6
+            if k % 1 == 0.0:
+                initialization_method = 'diagonal'
+                break
 
     # first, place all queens
     positions = []
@@ -328,7 +339,7 @@ def generate_time_data(min_n=4, max_n=1000, step_size=1):
         for n in range(min_n, max_n + 1, step_size):
             print("Running n =", n)
             start_time = time.time()
-            solve(n, verbose=0, initialization_method='diagonal')
+            solve(n, verbose=1, initialization_method='optimal')
             data.write(str(n) + "," + str(time.time()-start_time)+ "\n")
             print()
 
@@ -336,7 +347,7 @@ def generate_time_data(min_n=4, max_n=1000, step_size=1):
 def manual_execution(n):
     start_time = time.time()
     print("n =", n)
-    b = solve(n, verbose=2, initialization_method='diagonal')
+    b = solve(n, verbose=2, initialization_method='optimal')
     end_time = time.time() - start_time
     if end_time < 60:
         print("Time taken:", end_time, "seconds.")
@@ -344,5 +355,13 @@ def manual_execution(n):
         print("Time taken:", end_time/60, "minutes.")
     print(b)
 
-# generate_time_data(min_n=10, max_n=1000, step_size=10)
-# manual_execution(10)
+
+# generate_time_data(min_n=4, max_n=1000 , step_size=1)
+# manual_execution(14)
+
+# n = 500
+# random: 3.5 minutes
+# diagonal: 7.2 minutes
+# row_exclusive: 6.3 minutes
+
+# Note that random may work better when diagonal fails during initialization
